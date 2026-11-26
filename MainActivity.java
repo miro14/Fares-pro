@@ -15,6 +15,7 @@ import android.content.ContentValues;
 import android.provider.MediaStore;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.widget.FrameLayout;
 import android.graphics.Color;
 import android.content.pm.ActivityInfo;
@@ -214,6 +215,7 @@ static final String SAVE_JS="(function(){if(window.__saveHook)return;window.__sa
    }
   },"AndroidPrint");
   web.addJavascriptInterface(new Object(){
+   @JavascriptInterface public void close(){runOnUiThread(()->backDefault());}
    @JavascriptInterface public void landscape(boolean on){
     runOnUiThread(()->{try{setRequestedOrientation(on?ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE:ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);}catch(Exception ex){}});
    }
@@ -226,7 +228,7 @@ static final String SAVE_JS="(function(){if(window.__saveHook)return;window.__sa
      MediaService.push(MainActivity.this,t,sb,playing,p,d);
     });
    }
-   @JavascriptInterface public void stop(){runOnUiThread(()->{MediaService.shutdown();if(!visible&&ext)finishAndRemoveTask();});}
+   @JavascriptInterface public void stop(){hardStop();}
   },"AndroidMedia");
   web.setWebViewClient(new WebViewClient(){
    @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest r){return loader.shouldInterceptRequest(r.getUrl());}
@@ -621,7 +623,33 @@ static final String SAVE_JS="(function(){if(window.__saveHook)return;window.__sa
  }
  @Override protected void onStart(){super.onStart();visible=true;}
  @Override protected void onStop(){visible=false;super.onStop();}
- @Override protected void onDestroy(){if(cur==this)cur=null;MediaService.shutdown();if(tts!=null){tts.stop();tts.shutdown();}super.onDestroy();}
+ @Override protected void onDestroy(){
+  if(cur==this)cur=null;
+  MediaService.shutdown();
+  try{
+   if(web!=null){
+    try{web.evaluateJavascript("try{window.__pauseAll&&window.__pauseAll()}catch(x){}",null);}catch(Exception e){}
+    web.stopLoading(); web.loadUrl("about:blank"); web.onPause();
+    ViewParent vp=web.getParent(); if(vp instanceof ViewGroup)((ViewGroup)vp).removeView(web);
+    web.removeAllViews(); web.destroy();
+   }
+  }catch(Exception e){}
+  if(tts!=null){tts.stop();tts.shutdown();}
+  super.onDestroy();
+ }
+ void pauseAllMedia(){
+  try{web.evaluateJavascript("(function(){try{window.__pauseAll&&window.__pauseAll()}catch(x){}try{window.__mediaCmd&&window.__mediaCmd('pause')}catch(x){}})()",null);}catch(Exception e){}
+ }
+ /* إيقاف نهائي: يوقف كل صوت، ويُغلق الإشعار، ويُنهي الصفحة إن لم تكن ظاهرة */
+ void hardStop(){
+  runOnUiThread(()->{
+   pauseAllMedia();
+   MediaService.shutdown();
+   if(!visible&&ext){
+    try{web.postDelayed(()->finishAndRemoveTask(),150);}catch(Exception e){finishAndRemoveTask();}
+   }
+  });
+ }
  @SuppressWarnings("deprecation")
  void immersive(boolean on){
   View d=getWindow().getDecorView();
@@ -678,7 +706,7 @@ static final String SAVE_JS="(function(){if(window.__saveHook)return;window.__sa
    @Override public void onReceive(Context c,Intent in){
     String cc=in==null?null:in.getStringExtra("c");
     if(cc==null)return;
-    if("stop".equals(cc)){cmd("stop");stopAll();}
+    if("stop".equals(cc)){stopFromUi();}
     else cmd(cc);
    }
   };
@@ -700,12 +728,17 @@ static final String SAVE_JS="(function(){if(window.__saveHook)return;window.__sa
     @Override public void onPause(){cmd("pause");}
     @Override public void onSkipToNext(){cmd("next");}
     @Override public void onSkipToPrevious(){cmd("prev");}
-    @Override public void onStop(){cmd("stop");}
+    @Override public void onStop(){stopFromUi();}
     @Override public void onSeekTo(long p){cmd("seek:"+p);}
    });
    sess.setActive(true);
    PowerManager pm=(PowerManager)getSystemService(POWER_SERVICE);
    wl=pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"filereader:play"); wl.setReferenceCounted(false);
+  }
+  static void stopFromUi(){
+   final MainActivity a=MainActivity.cur;
+   if(a!=null)a.hardStop();
+   if(inst!=null)inst.stopAll();
   }
   static void cmd(final String c){
    final MainActivity a=MainActivity.cur; if(a==null||a.web==null)return;
