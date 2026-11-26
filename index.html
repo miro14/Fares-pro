@@ -2745,7 +2745,7 @@ body.mv-edit #mvEye{display:flex}
    m.playsInline=true;m.preload='auto';m.muted=false;bMute.innerHTML=I.vol;
    ['play','pause','ended','timeupdate','loadedmetadata','durationchange'].forEach(ev=>m.addEventListener(ev,()=>{syncVid();if(ev==='play')showUi()}));
    m.addEventListener('loadedmetadata',()=>{bRot.style.display=(window.AndroidUi&&m.videoWidth>=m.videoHeight)?'':'none'});
-   m.addEventListener('error',()=>fail());
+   m.addEventListener('error',()=>{if(!it.fb){it.fb=1;blobOf(it.u).then(s=>{it.src=s;if(st.items[st.i]===it)render()}).catch(()=>fail())}else fail()});
   }else m.addEventListener('error',()=>fail());
   stage.append(m);media=m;
   if(it.kind==='vid'){m.play().catch(()=>{});syncVid()}
@@ -2775,16 +2775,8 @@ body.mv-edit #mvEye{display:flex}
  const orig=window.openFromNative;
  window.openFromNative=async function(u,n,t){
   const k=kind(n,t);let it=null;
-  if(k&&document.body){it={name:n||'file',kind:k,u,src:null};add(it)}
+  if(k&&document.body){it={name:n||'file',kind:k,u,src:k==='vid'?u:null};add(it)}
   const r=await orig.apply(this,arguments);
-  if(it&&k==='vid'){
-   /* نعيد استخدام رابط الفيديو الذي أنشأته الصفحة لتفادي مضاعفة الذاكرة */
-   let tries=0;const find=()=>{
-    const v=[...document.querySelectorAll('video')].find(x=>!root.contains(x)&&/^blob:/.test(x.currentSrc||x.src||''));
-    if(v){it.src=v.currentSrc||v.src;if(st.items[st.i]===it&&!media)render();return}
-    if(++tries<40)setTimeout(find,100);else blobOf(u).then(s=>{it.src=s;if(st.items[st.i]===it&&!media)render()}).catch(()=>fail());
-   };find();
-  }
   return r;
  };
 })();
