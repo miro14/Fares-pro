@@ -231,7 +231,21 @@ static final String SAVE_JS="(function(){if(window.__saveHook)return;window.__sa
    @JavascriptInterface public void stop(){hardStop();}
   },"AndroidMedia");
   web.setWebViewClient(new WebViewClient(){
-   @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest r){return loader.shouldInterceptRequest(r.getUrl());}
+   @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest r){
+    Uri url=r.getUrl();
+    try{
+     String pth=url.getPath();
+     if(pth!=null&&pth.startsWith("/opened/")){
+      Uri fu=opened.get(pth.substring(8));
+      if(fu!=null){
+       java.util.Map<String,String> hd=r.getRequestHeaders();
+       WebResourceResponse rr=openedResponse(fu,hd==null?null:hd.get("Range"));
+       if(rr!=null)return rr;
+      }
+     }
+    }catch(Exception e){}
+    return loader.shouldInterceptRequest(url);
+   }
    @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap bm){super.onPageStarted(v,u,bm);v.evaluateJavascript(ttsJs,null);}
    @Override public void onPageFinished(WebView v,String u){v.evaluateJavascript(SAVE_JS,null);v.evaluateJavascript(ttsJs,null);ready=true;flush();}
   });
@@ -266,11 +280,49 @@ static final String SAVE_JS="(function(){if(window.__saveHook)return;window.__sa
   if(!us.isEmpty()){ext=true;web.setVisibility(View.INVISIBLE);web.postDelayed(()->web.setVisibility(View.VISIBLE),6000);}
   flush();
  }
+ /* يخدم الملفات المفتوحة مع دعم Range حتى يبدأ الفيديو فوراً ويقبل التقديم والتأخير */
+ WebResourceResponse openedResponse(Uri u,String range){
+  try{
+   String t=type(u); if(t.isEmpty())t="application/octet-stream";
+   android.content.res.AssetFileDescriptor afd=getContentResolver().openAssetFileDescriptor(u,"r");
+   if(afd==null)return null;
+   long len=afd.getLength();
+   java.util.Map<String,String> h=new HashMap<>(); h.put("Accept-Ranges","bytes");
+   if(range!=null&&range.startsWith("bytes=")&&len>0){
+    String[] pr=range.substring(6).split(",")[0].trim().split("-",-1);
+    long start,end;
+    if(pr[0].isEmpty()){long sfx=Long.parseLong(pr[1]);start=Math.max(0,len-sfx);end=len-1;}
+    else{start=Long.parseLong(pr[0]);end=(pr.length>1&&!pr[1].isEmpty())?Math.min(Long.parseLong(pr[1]),len-1):len-1;}
+    if(start>=len||start>end){afd.close();return new WebResourceResponse(t,null,416,"Requested Range Not Satisfiable",h,new java.io.ByteArrayInputStream(new byte[0]));}
+    final java.io.FileInputStream raw=afd.createInputStream();
+    long sk=0; while(sk<start){long n=raw.skip(start-sk); if(n<=0)break; sk+=n;}
+    final long cnt=end-start+1;
+    h.put("Content-Range","bytes "+start+"-"+end+"/"+len); h.put("Content-Length",String.valueOf(cnt));
+    java.io.InputStream lim=new java.io.FilterInputStream(raw){
+     long left=cnt;
+     @Override public int read()throws java.io.IOException{if(left<=0)return -1;int b=super.read();if(b>=0)left--;return b;}
+     @Override public int read(byte[] b,int o,int l)throws java.io.IOException{if(left<=0)return -1;int n=super.read(b,o,(int)Math.min(l,left));if(n>0)left-=n;return n;}
+    };
+    return new WebResourceResponse(t,null,206,"Partial Content",h,lim);
+   }
+   if(len>=0)h.put("Content-Length",String.valueOf(len));
+   return new WebResourceResponse(t,null,200,"OK",h,afd.createInputStream());
+  }catch(Exception e){return null;}
+ }
  String name(Uri u){
   try(Cursor c=getContentResolver().query(u,null,null,null,null)){if(c!=null&&c.moveToFirst()){int k=c.getColumnIndex(OpenableColumns.DISPLAY_NAME);if(k>=0&&c.getString(k)!=null)return c.getString(k);}}catch(Exception e){}
   String p=u.getLastPathSegment(); return p==null?"file":p;
  }
- String type(Uri u){String t=getContentResolver().getType(u);return t==null?"":t;}
+ String type(Uri u){
+  String t=getContentResolver().getType(u);
+  if(t==null||t.isEmpty()||"application/octet-stream".equals(t)){
+   try{
+    String n=name(u); int d=n.lastIndexOf('.');
+    if(d>=0){String g=MimeTypeMap.getSingleton().getMimeTypeFromExtension(n.substring(d+1).toLowerCase()); if(g!=null)return g;}
+   }catch(Exception e){}
+  }
+  return t==null?"":t;
+ }
  void poll(int n){
   web.evaluateJavascript("document.body&&document.body.classList.contains('ext')?1:0",v->{
    if("1".equals(v)||n>30)web.postDelayed(()->web.setVisibility(View.VISIBLE),250);
