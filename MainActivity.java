@@ -216,6 +216,10 @@ static final String SAVE_JS="(function(){if(window.__saveHook)return;window.__sa
   },"AndroidPrint");
   web.addJavascriptInterface(new Object(){
    @JavascriptInterface public void close(){runOnUiThread(()->backDefault());}
+   @JavascriptInterface public void orient(String mode){
+    final int o="land".equals(mode)?ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE:("port".equals(mode)?ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT:ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+    runOnUiThread(()->{try{setRequestedOrientation(o);}catch(Exception ex){}});
+   }
    @JavascriptInterface public void landscape(boolean on){
     runOnUiThread(()->{try{setRequestedOrientation(on?ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE:ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);}catch(Exception ex){}});
    }
@@ -276,7 +280,8 @@ static final String SAVE_JS="(function(){if(window.__saveHook)return;window.__sa
   if(Intent.ACTION_VIEW.equals(a)&&i.getData()!=null)us.add(i.getData());
   else if(Intent.ACTION_SEND.equals(a)){Uri u=i.getParcelableExtra(Intent.EXTRA_STREAM);if(u!=null)us.add(u);}
   else if(Intent.ACTION_SEND_MULTIPLE.equals(a)){ArrayList<Uri> l=i.getParcelableArrayListExtra(Intent.EXTRA_STREAM);if(l!=null)us.addAll(l);}
-  for(Uri u:us){String id=String.valueOf(seq++);opened.put(id,u);pending.add(new String[]{"https://"+HOST+"/opened/"+id,name(u),type(u)});}
+  boolean first=true;
+  for(Uri u:us){String id=String.valueOf(seq++);opened.put(id,u);pending.add(new String[]{"https://"+HOST+"/opened/"+id,name(u),type(u),first?"true":"false"});first=false;}
   if(!us.isEmpty()){ext=true;web.setVisibility(View.INVISIBLE);web.postDelayed(()->web.setVisibility(View.VISIBLE),6000);}
   flush();
  }
@@ -333,7 +338,7 @@ static final String SAVE_JS="(function(){if(window.__saveHook)return;window.__sa
   if(!ready)return;
   boolean any=!pending.isEmpty();
   if(any)poll(0);
-  for(String[] p:pending)web.evaluateJavascript("openFromNative("+JSONObject.quote(p[0])+","+JSONObject.quote(p[1])+","+JSONObject.quote(p[2])+")",null);
+  for(String[] p:pending)web.evaluateJavascript("openFromNative("+JSONObject.quote(p[0])+","+JSONObject.quote(p[1])+","+JSONObject.quote(p[2])+","+(p.length>3?p[3]:"true")+")",null);
   pending.clear();
  }
  @Override protected void onActivityResult(int rc,int res,Intent d){
